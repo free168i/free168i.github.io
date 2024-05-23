@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>อ่านนิยายให้ฟัง</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        #container {
+            text-align: center;
+        }
+        #content {
+            margin-bottom: 20px;
+        }
+        #readBtn, #stopBtn {
+            padding: 10px 20px;
+            font-size: 16px;
+            color: white;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            max-width: 200px;
+            margin-bottom: 10px;
+        }
+        #readBtn {
+            background-color: #4CAF50;
+        }
+        #readBtn:hover {
+            background-color: #45a049;
+        }
+        #stopBtn {
+            background-color: #f44336;
+            display: none;
+        }
+        #stopBtn:hover {
+            background-color: #e53935;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 20px auto;
+        }
+        #extractedImg {
+            display: none;
+            max-width: 100%;
+            margin-top: 20px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+    <div id="container">
+        <h1>อ่านนิยายให้ฟัง</h1>
+        <div id="content">
+            <p>กาลครั้งหนึ่งนานมาแล้ว...</p>
+        </div>
+        <input type="file" id="imageInput" accept="image/*">
+        <button id="readBtn">อ่านให้ฟัง</button>
+        <button id="stopBtn">หยุดการอ่าน</button>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <img id="extractedImg" alt="Extracted Image">
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var readBtn = document.getElementById('readBtn');
+            var stopBtn = document.getElementById('stopBtn');
+            var imageInput = document.getElementById('imageInput');
+            var contentElement = document.getElementById('content');
+            var canvas = document.getElementById('canvas');
+            var ctx = canvas.getContext('2d');
+            var extractedImg = document.getElementById('extractedImg');
+            var content = contentElement.innerText;
+            var speech = new SpeechSynthesisUtterance(content);
+
+            // Function to determine the language of the text
+            function detectLanguage(text) {
+                const thaiRegex = /[\u0E00-\u0E7F]/;
+                return thaiRegex.test(text) ? 'th-TH' : 'en-US';
+            }
+
+            // Function to get the appropriate voice for the language
+            function getVoiceByLang(lang) {
+                var voices = speechSynthesis.getVoices();
+                return voices.find(voice => voice.lang === lang) || voices.find(voice => voice.lang.startsWith(lang.split('-')[0]));
+            }
+
+            // Function to read text aloud
+            function readText(text) {
+                speech.text = text;
+                var lang = detectLanguage(text);
+                speech.lang = lang;
+                speech.voice = getVoiceByLang(lang);
+                speechSynthesis.speak(speech);
+
+                // Change button states
+                readBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+            }
+
+            // Event listener for reading existing text
+            readBtn.addEventListener('click', function() {
+                readText(content);
+            });
+
+            // Event listener for stopping speech
+            stopBtn.addEventListener('click', function() {
+                speechSynthesis.cancel();
+                readBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+            });
+
+            // Event listener for end of speech
+            speech.onend = function() {
+                readBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+            };
+
+            // Event listener for image input
+            imageInput.addEventListener('change', function(event) {
+                var file = event.target.files[0];
+                if (file) {
+                    var reader = new FileReader();
+                    reader.onload = function(e) {
+                        var img = new Image();
+                        img.src = e.target.result;
+                        img.onload = function() {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+
+                            // Simple red rectangle detection
+                            var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                            var data = imageData.data;
+                            var detected = false;
+                            var minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+                            
+                            // Simplified algorithm to detect a red rectangle
+                            for (var y = 0; y < canvas.height; y++) {
+                                for (var x = 0; x < canvas.width; x++) {
+                                    var index = (y * canvas.width + x) * 4;
+                                    var r = data[index];
+                                    var g = data[index + 1];
+                                    var b = data[index + 2];
+                                    
+                                    if (r > 200 && g < 50 && b < 50) { // simple red detection
+                                        minX = Math.min(minX, x);
+                                        minY = Math.min(minY, y);
+                                        maxX = Math.max(maxX, x);
+                                        maxY = Math.max(maxY, y);
+                                        detected = true;
+                                    }
+                                }
+                            }
+
+                            if (detected) {
+                                // Extract the detected rectangle region
+                                var extractCanvas = document.createElement('canvas');
+                                var extractCtx = extractCanvas.getContext('2d');
+                                var rectWidth = maxX - minX + 1;
+                                var rectHeight = maxY - minY + 1;
+                                extractCanvas.width = rectWidth;
+                                extractCanvas.height = rectHeight;
+                                extractCtx.drawImage(canvas, minX, minY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
+
+                                // Display the extracted image
+                                var extractedDataURL = extractCanvas.toDataURL();
+                                extractedImg.src = extractedDataURL;
+                                extractedImg.style.display = 'block';
+
+                                // Use OCR on the extracted part
+                                Tesseract.recognize(
+                                    extractCanvas,
+                                    'tha+eng', // Set OCR languages to Thai and English
+                                    {
+                                        logger: function(m) { console.log(m); }
+                                    }
+                                ).then(function(result) {
+                                    content = result.data.text;
+                                    contentElement.innerText = content;
+                                    readText(content);
+                                });
+                            } else {
+                                alert('ไม่พบสี่เหลี่ยมสีแดงในภาพ');
+                            }
+                        };
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            // Check if browser supports Speech Synthesis
+            if (!('speechSynthesis' in window)) {
+                alert('ขออภัย บราวเซอร์ของคุณไม่รองรับการอ่านข้อความ');
+            } else {
+                // Preload voices to ensure they are ready when needed
+                speechSynthesis.onvoiceschanged = function() {
+                    speech.voice = getVoiceByLang(detectLanguage(content));
+                };
+            }
+        });
+    </script>
+
+    <div id="container">
+        <!-- HTML content remains unchanged -->
+    </div>
+
+    <script>
+        // Your existing JavaScript code remains here
+        
+        // Function to get the appropriate voice for the language
+        function getVoiceByLang(lang) {
+            var voices = speechSynthesis.getVoices();
+            // Find the voice that matches the specified language
+            var voice = voices.find(voice => voice.lang === lang);
+            // If voice not found, find the voice that starts with the specified language code
+            if (!voice) {
+                voice = voices.find(voice => voice.lang.startsWith(lang.split('-')[0]));
+            }
+            // If still no voice found and the language is Thai, try to find Thai voice specifically
+            if (!voice && lang === 'th-TH') {
+                voice = voices.find(voice => voice.lang === 'th-TH');
+            }
+            return voice;
+        }
+    </script>
+</body>
+</html>
